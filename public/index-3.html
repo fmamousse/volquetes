@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Volquetes San Miguel</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  :root{
+    --bg:#fafaf9; --surface:#ffffff; --line:#ececec; --ink:#1a1a1a;
+    --muted:#8a8a8a; --accent:#16a34a; --debe:#e0632e; --pagado:#16a34a;
+    --shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06);
+    --radius:14px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--ink); overflow:hidden;
+  }
+  #app{display:flex;flex-direction:column;height:100dvh;}
+
+  /* Header */
+  header{
+    padding:14px 18px;background:var(--surface);border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;z-index:1000;
+  }
+  header h1{font-size:16px;font-weight:600;margin:0;letter-spacing:-.01em;}
+  header .sub{font-size:12px;color:var(--muted);margin-top:1px;}
+  .count{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+
+  /* Map: posición absoluta para llenar SIEMPRE el contenedor (si no, Leaflet
+     recibe altura 0 en flexbox y queda en blanco). */
+  #map{position:absolute;inset:0;width:100%;height:100%;z-index:1;}
+  .leaflet-container{font:inherit;background:#eef0ef;}
+
+  /* Filtros flotantes */
+  .filters{
+    position:absolute;top:70px;left:50%;transform:translateX(-50%);
+    z-index:600;display:flex;gap:6px;background:var(--surface);
+    padding:5px;border-radius:999px;box-shadow:var(--shadow);
+  }
+  .filters button{
+    border:0;background:transparent;font:inherit;font-size:12.5px;font-weight:500;
+    color:var(--muted);padding:6px 13px;border-radius:999px;cursor:pointer;
+    transition:.15s;white-space:nowrap;
+  }
+  .filters button.active{background:var(--ink);color:#fff;}
+
+  /* Botón flotante agregar */
+  .fab{
+    position:absolute;right:18px;bottom:22px;z-index:600;
+    width:56px;height:56px;border-radius:50%;border:0;background:var(--accent);
+    color:#fff;font-size:30px;line-height:1;cursor:pointer;
+    box-shadow:0 6px 20px rgba(22,163,74,.4);transition:transform .12s;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .fab:active{transform:scale(.92);}
+
+  /* Lista deslizable */
+  .list-toggle{
+    position:absolute;left:18px;bottom:22px;z-index:600;
+    background:var(--surface);border:0;border-radius:999px;box-shadow:var(--shadow);
+    padding:13px 18px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;
+    display:flex;align-items:center;gap:7px;
+  }
+
+  /* Sheet (modal inferior) */
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.32);z-index:1500;
+    opacity:0;pointer-events:none;transition:.2s;}
+  .scrim.open{opacity:1;pointer-events:auto;}
+  .sheet{
+    position:fixed;left:0;right:0;bottom:0;z-index:2000;
+    background:var(--surface);border-radius:20px 20px 0 0;
+    box-shadow:0 -8px 40px rgba(0,0,0,.18);
+    transform:translateY(100%);transition:transform .26s cubic-bezier(.4,0,.2,1);
+    max-height:90dvh;display:flex;flex-direction:column;
+  }
+  .sheet.open{transform:translateY(0);}
+  .grip{width:38px;height:4px;background:#dcdcdc;border-radius:99px;margin:10px auto 4px;}
+  .sheet-head{padding:6px 20px 14px;border-bottom:1px solid var(--line);}
+  .sheet-head h2{margin:0;font-size:17px;font-weight:600;letter-spacing:-.01em;}
+  .sheet-body{padding:18px 20px 28px;overflow-y:auto;}
+
+  label.field{display:block;margin-bottom:15px;}
+  label.field > span{display:block;font-size:12.5px;font-weight:600;color:#555;margin-bottom:6px;}
+  input[type=text],input[type=number],input[type=date],select,textarea{
+    width:100%;border:1px solid var(--line);background:#fcfcfc;border-radius:10px;
+    padding:12px 13px;font:inherit;font-size:15px;color:var(--ink);outline:none;transition:.15s;
+  }
+  input:focus,select:focus,textarea:focus{border-color:var(--accent);background:#fff;
+    box-shadow:0 0 0 3px rgba(22,163,74,.1);}
+  textarea{resize:none;min-height:54px;}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:5px;}
+
+  /* segmented controls */
+  .seg{display:flex;gap:6px;flex-wrap:wrap;}
+  .seg button{
+    flex:1;min-width:calc(50% - 3px);border:1px solid var(--line);background:#fcfcfc;
+    border-radius:10px;padding:11px 8px;font:inherit;font-size:13.5px;font-weight:500;
+    color:#555;cursor:pointer;transition:.12s;
+  }
+  .seg button.sel{border-color:var(--ink);background:var(--ink);color:#fff;}
+  .seg.pay button.sel[data-v="pagado"]{background:var(--pagado);border-color:var(--pagado);}
+  .seg.pay button.sel[data-v="debe"]{background:var(--debe);border-color:var(--debe);}
+
+  .save{
+    width:100%;border:0;background:var(--accent);color:#fff;font:inherit;
+    font-size:16px;font-weight:600;padding:15px;border-radius:12px;cursor:pointer;
+    margin-top:4px;transition:.12s;
+  }
+  .save:active{transform:scale(.99);filter:brightness(.96);}
+  .delete{
+    width:100%;border:0;background:transparent;color:var(--debe);font:inherit;
+    font-size:14px;font-weight:600;padding:13px;cursor:pointer;margin-top:8px;
+  }
+
+  /* List view items */
+  .list-sheet .sheet-body{padding-top:8px;}
+  .item{
+    display:flex;align-items:center;gap:12px;padding:13px 4px;
+    border-bottom:1px solid var(--line);cursor:pointer;
+  }
+  .item:last-child{border-bottom:0;}
+  .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+  .item .info{flex:1;min-width:0;}
+  .item .info .top{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .item .info .bot{font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .badge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:99px;flex-shrink:0;}
+  .badge.pagado{background:#e7f6ec;color:var(--pagado);}
+  .badge.debe{background:#fcebe3;color:var(--debe);}
+  .days{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    flex-shrink:0;min-width:46px;padding:5px 6px;border-radius:10px;background:#f4f4f3;}
+  .days .n{font-size:18px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;}
+  .days .l{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-top:2px;}
+  .days.warn{background:#fcebe3;}
+  .days.warn .n{color:var(--debe);}
+  .empty{text-align:center;color:var(--muted);padding:50px 20px;font-size:14px;}
+
+  /* Popup del mapa */
+  .leaflet-popup-content{margin:12px 14px;font-family:inherit;}
+  .pop .pt{font-size:15px;font-weight:600;margin-bottom:2px;}
+  .pop .pm{font-size:12.5px;color:var(--muted);margin-bottom:8px;}
+  .pop .prow{font-size:13px;margin:3px 0;}
+  .pop .pbadge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:99px;margin-top:4px;}
+  .pop .acts{display:flex;gap:8px;margin-top:10px;}
+  .pop .acts a{flex:1;text-align:center;text-decoration:none;font-size:13px;font-weight:600;
+    padding:8px;border-radius:8px;background:#f0f0f0;color:var(--ink);}
+  .pop .acts a.edit{background:var(--ink);color:#fff;}
+
+  .pin{display:flex;align-items:center;justify-content:center;
+    width:30px;height:30px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);
+    box-shadow:0 2px 6px rgba(0,0,0,.3);border:2px solid #fff;}
+  .pin span{transform:rotate(45deg);font-size:12px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;}
+
+  .tap-hint{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:650;
+    background:rgba(26,26,26,.9);color:#fff;font-size:13px;font-weight:500;
+    padding:10px 16px;border-radius:99px;pointer-events:none;
+    opacity:0;transition:.2s;
+  }
+  .tap-hint.show{opacity:1;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>
+      <h1>Volquetes San Miguel</h1>
+      <div class="sub">Referencia rápida</div>
+    </div>
+    <div class="count" id="count">0 en calle</div>
+  </header>
+  <div class="map-wrap" style="position:relative;flex:1;min-height:0;">
+    <div id="map"></div>
+    <div class="filters" id="filters">
+      <button class="active" data-f="todos">Todos</button>
+      <button data-f="debe">Debe</button>
+      <button data-f="pagado">Pagado</button>
+    </div>
+    <div class="tap-hint" id="tapHint">Tocá el mapa para marcar la ubicación</div>
+    <button class="list-toggle" id="listBtn">☰ Lista</button>
+    <button class="fab" id="addBtn">+</button>
+  </div>
+</div>
+
+<!-- Sheet: formulario -->
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="formSheet">
+  <div class="grip"></div>
+  <div class="sheet-head"><h2 id="formTitle">Nuevo volquete</h2></div>
+  <div class="sheet-body">
+    <label class="field">
+      <span>Cliente / referencia</span>
+      <input type="text" id="f_cliente" placeholder="Ej: Obra Pérez, García construcción…">
+    </label>
+
+    <label class="field">
+      <span>Ubicación</span>
+      <input type="text" id="f_dir" placeholder="Ej: Av. Mitre 1234, San Miguel">
+      <div class="hint" id="gpsHint">Sin punto fijado todavía.</div>
+    </label>
+
+    <label class="field">
+      <span>Fecha de entrega</span>
+      <input type="date" id="f_fecha">
+    </label>
+
+    <div class="field">
+      <span>Tipo de carga</span>
+      <div class="seg" id="segTipo">
+        <button type="button" data-v="Tierra / escombros">Tierra / escombros</button>
+        <button type="button" data-v="Residuos mezclados">Residuos mezclados</button>
+        <button type="button" data-v="Poda / verde">Poda / verde</button>
+        <button type="button" data-v="Otro">Otro</button>
+      </div>
+      <input type="text" id="f_tipoOtro" placeholder="Especificá el tipo…" style="display:none;margin-top:8px;">
+    </div>
+
+    <div class="field">
+      <span>Cobro</span>
+      <div class="seg pay" id="segPago">
+        <button type="button" data-v="debe">Debe</button>
+        <button type="button" data-v="pagado">Pagado</button>
+      </div>
+    </div>
+
+    <label class="field">
+      <span>Nota (opcional)</span>
+      <textarea id="f_nota" placeholder="Teléfono, observaciones…"></textarea>
+    </label>
+
+    <button class="save" id="saveBtn">Guardar</button>
+    <button class="delete" id="delBtn" style="display:none;">Eliminar volquete</button>
+  </div>
+</div>
+
+<!-- Sheet: lista -->
+<div class="sheet list-sheet" id="listSheet">
+  <div class="grip"></div>
+  <div class="sheet-head"><h2>Volquetes en calle</h2></div>
+  <div class="sheet-body" id="listBody"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ---------- Estado ---------- */
+const STORE = 'volquetes_sm_v1';
+let data = load();
+let editingId = null;
+let pickedLatLng = null;   // punto elegido en el form actual
+let pickMode = false;      // estamos esperando un tap en el mapa
+let filter = 'todos';
+
+function load(){ try{return JSON.parse(localStorage.getItem(STORE))||[];}catch{return [];} }
+function save(){ localStorage.setItem(STORE, JSON.stringify(data)); }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
+
+/* ---------- Mapa ---------- */
+// Centro por defecto: San Miguel, Buenos Aires
+let map=null, MAP_OK=false;
+try{
+  if(typeof L==='undefined') throw new Error('Leaflet no cargó');
+  // Límites de la provincia de Buenos Aires (aprox). El mapa no deja salir de acá.
+  const BA_BOUNDS = L.latLngBounds([-41.1, -63.5], [-33.2, -56.6]);
+  map = L.map('map',{
+    zoomControl:false,
+    maxBounds: BA_BOUNDS,
+    maxBoundsViscosity: 1.0,   // "rebota" si intentás salir del área
+    minZoom: 6
+  }).setView([-34.61,-58.45], 10);  // centrado en el AMBA
+  L.control.zoom({position:'topright'}).addTo(map);
+  const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution:'&copy; OpenStreetMap', maxZoom:19
+  });
+  // Si las imágenes del mapa no cargan (red bloqueada), avisar en vez de dejar blanco.
+  let tilesLoaded=false;
+  tiles.on('load', ()=>{ tilesLoaded=true; });
+  tiles.on('tileerror', ()=>{
+    if(!tilesLoaded){
+      const m=document.getElementById('map');
+      if(m && !m.querySelector('.map-warn')){
+        const w=document.createElement('div');
+        w.className='map-warn';
+        w.style.cssText='position:absolute;inset:0;z-index:401;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f4f4f3;padding:30px;text-align:center;color:#8a8a8a;font-size:14px;';
+        w.innerHTML='<div style="font-size:34px;margin-bottom:10px;">🗺️</div><b style="color:#1a1a1a;font-size:15px;margin-bottom:6px;">No se pudieron cargar las imágenes del mapa</b>Tu red está bloqueando el servidor de mapas.<br>La app funciona igual: usá <b>☰ Lista</b> para ver y cargar volquetes.';
+        m.appendChild(w);
+      }
+    }
+  });
+  tiles.addTo(map);
+  MAP_OK=true;
+  // Fix clásico de Leaflet: forzar recálculo del tamaño una vez que el
+  // contenedor ya tiene dimensiones reales. Sin esto, el mapa queda en blanco.
+  function despertarMapa(){ if(map){ map.invalidateSize(true); } }
+  window.addEventListener('load', ()=>{ setTimeout(despertarMapa, 100); setTimeout(despertarMapa, 500); });
+  setTimeout(despertarMapa, 300);
+}catch(err){
+  document.getElementById('map').innerHTML =
+    '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:30px;text-align:center;color:#8a8a8a;font-size:14px;">'+
+    '<div style="font-size:34px;margin-bottom:10px;">🗺️</div>'+
+    '<b style="color:#1a1a1a;font-size:15px;margin-bottom:6px;">El mapa necesita internet</b>'+
+    'No se pudo cargar el mapa, pero la app funciona igual.<br>Usá el botón <b>☰ Lista</b> para ver y cargar volquetes.'+
+    '</div>';
+}
+
+let markers = {};
+function colorFor(p){ return p==='pagado' ? getCSS('--pagado') : getCSS('--debe'); }
+function getCSS(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+function makeIcon(v){
+  const c = colorFor(v.pago);
+  const d = daysSince(v.fecha);
+  const txt = d==null ? '·' : d;
+  return L.divIcon({
+    className:'', iconSize:[30,30], iconAnchor:[15,30], popupAnchor:[0,-28],
+    html:`<div class="pin" style="background:${c}"><span>${txt}</span></div>`
+  });
+}
+
+function daysSince(d){
+  if(!d) return null;
+  const ms = Date.now() - new Date(d+'T00:00:00').getTime();
+  return Math.floor(ms/86400000);
+}
+
+function renderMarkers(){
+  if(!MAP_OK) return;
+  Object.values(markers).forEach(m=>map.removeLayer(m));
+  markers={};
+  visible().forEach(v=>{
+    if(v.lat==null||v.lng==null) return;
+    const m = L.marker([v.lat,v.lng],{icon:makeIcon(v)}).addTo(map);
+    m.bindPopup(popupHtml(v));
+    markers[v.id]=m;
+  });
+}
+
+function popupHtml(v){
+  const d = daysSince(v.fecha);
+  const fechaTxt = v.fecha ? new Date(v.fecha+'T00:00:00').toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
+  const diasStr = d==null ? '' : (d===0?'hoy':`hace ${d} día${d===1?'':'s'}`);
+  const dias = v.fecha ? `<div class="prow">📅 Entregado ${fechaTxt}${diasStr?' · <b>'+diasStr+'</b>':''}</div>` : '';
+  const badgeCls = v.pago==='pagado'?'pagado':'debe';
+  const badgeBg = v.pago==='pagado'?'#e7f6ec':'#fcebe3';
+  const badgeCol = colorFor(v.pago);
+  const waNum = (v.nota||'').replace(/\D/g,'');
+  const wa = waNum.length>=8 ? `<a href="https://wa.me/${waNum.startsWith('54')?waNum:'54'+waNum}" target="_blank">WhatsApp</a>` : '';
+  const gmaps = `<a href="https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lng}" target="_blank">Cómo llegar</a>`;
+  return `<div class="pop">
+    <div class="pt">${esc(v.cliente||'Sin nombre')}</div>
+    <div class="pm">${esc(v.dir||'')}</div>
+    ${v.tipo?`<div class="prow">🗑️ ${esc(v.tipo)}</div>`:''}
+    ${dias}
+    <span class="pbadge" style="background:${badgeBg};color:${badgeCol}">${v.pago==='pagado'?'Pagado':'Debe'}</span>
+    ${v.nota?`<div class="prow" style="margin-top:6px;color:#666">${esc(v.nota)}</div>`:''}
+    <div class="acts">
+      ${gmaps}${wa}
+      <a class="edit" href="#" onclick="openEdit('${v.id}');return false;">Editar</a>
+    </div>
+  </div>`;
+}
+function esc(s){ return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ---------- Filtros ---------- */
+function visible(){
+  if(filter==='todos') return data;
+  return data.filter(v=>v.pago===filter);
+}
+document.getElementById('filters').onclick=e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  filter=b.dataset.f;
+  [...e.currentTarget.children].forEach(x=>x.classList.toggle('active',x===b));
+  renderMarkers(); renderList(); updateCount();
+};
+
+function updateCount(){
+  const n=data.length;
+  const debe=data.filter(v=>v.pago==='debe').length;
+  document.getElementById('count').textContent =
+    `${n} en calle${debe?' · '+debe+' debe'+(debe===1?'':'n'):''}`;
+}
+
+/* ---------- Lista ---------- */
+function renderList(){
+  const body=document.getElementById('listBody');
+  const items=visible().slice().sort((a,b)=>(b.fecha||'').localeCompare(a.fecha||''));
+  if(!items.length){ body.innerHTML='<div class="empty">No hay volquetes cargados.<br>Tocá el botón + para agregar uno.</div>'; return; }
+  body.innerHTML=items.map(v=>{
+    const d=daysSince(v.fecha);
+    const dTxt = d==null ? '—' : d;
+    const dLbl = d==null ? '' : (d===1?'día':'días');
+    const warn = (d!=null && d>=7) ? ' warn' : '';
+    const fechaTxt = v.fecha ? new Date(v.fecha+'T00:00:00').toLocaleDateString('es-AR',{day:'2-digit',month:'short'}) : 'sin fecha';
+    const sub=[v.dir, v.tipo].filter(Boolean).join(' · ');
+    return `<div class="item" onclick="openEdit('${v.id}')">
+      <div class="days${warn}"><div class="n">${dTxt}</div><div class="l">${dLbl||'—'}</div></div>
+      <div class="info">
+        <div class="top">${esc(v.cliente||'Sin nombre')}</div>
+        <div class="bot">Entregado ${fechaTxt}${sub?' · '+esc(sub):''}</div>
+      </div>
+      <div class="badge ${v.pago}">${v.pago==='pagado'?'Pagado':'Debe'}</div>
+    </div>`;
+  }).join('');
+}
+
+/* ---------- Sheets ---------- */
+const scrim=document.getElementById('scrim');
+const formSheet=document.getElementById('formSheet');
+const listSheet=document.getElementById('listSheet');
+
+function openSheet(s){ scrim.classList.add('open'); s.classList.add('open'); }
+function closeSheets(){ scrim.classList.remove('open'); formSheet.classList.remove('open'); listSheet.classList.remove('open'); pickMode=false; document.getElementById('tapHint').classList.remove('show'); }
+scrim.onclick=closeSheets;
+
+document.getElementById('listBtn').onclick=()=>{ renderList(); openSheet(listSheet); };
+document.getElementById('addBtn').onclick=()=>openForm(null);
+
+/* ---------- Formulario ---------- */
+let selTipo=null, selPago='debe';
+
+function setSeg(group, val){
+  [...group.children].forEach(b=>b.classList.toggle('sel', b.dataset.v===val));
+}
+document.getElementById('segTipo').onclick=e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  selTipo=b.dataset.v; setSeg(e.currentTarget,selTipo);
+  document.getElementById('f_tipoOtro').style.display = selTipo==='Otro'?'block':'none';
+};
+document.getElementById('segPago').onclick=e=>{
+  const b=e.target.closest('button'); if(!b)return;
+  selPago=b.dataset.v; setSeg(e.currentTarget,selPago);
+};
+
+function openForm(id){
+  editingId=id; pickedLatLng=null;
+  const del=document.getElementById('delBtn');
+  if(id){
+    const v=data.find(x=>x.id===id);
+    document.getElementById('formTitle').textContent='Editar volquete';
+    document.getElementById('f_cliente').value=v.cliente||'';
+    document.getElementById('f_dir').value=v.dir||'';
+    document.getElementById('f_fecha').value=v.fecha||'';
+    document.getElementById('f_nota').value=v.nota||'';
+    selPago=v.pago||'debe';
+    // tipo
+    const known=['Tierra / escombros','Residuos mezclados','Poda / verde'];
+    if(v.tipo && known.includes(v.tipo)){ selTipo=v.tipo; document.getElementById('f_tipoOtro').style.display='none'; document.getElementById('f_tipoOtro').value=''; }
+    else if(v.tipo){ selTipo='Otro'; document.getElementById('f_tipoOtro').style.display='block'; document.getElementById('f_tipoOtro').value=v.tipo; }
+    else { selTipo=null; }
+    if(v.lat!=null){ pickedLatLng={lat:v.lat,lng:v.lng}; }
+    setHint();
+    del.style.display='block';
+  }else{
+    document.getElementById('formTitle').textContent='Nuevo volquete';
+    document.getElementById('f_cliente').value='';
+    document.getElementById('f_dir').value='';
+    document.getElementById('f_fecha').value=new Date().toISOString().slice(0,10);
+    document.getElementById('f_nota').value='';
+    document.getElementById('f_tipoOtro').value='';
+    document.getElementById('f_tipoOtro').style.display='none';
+    selTipo=null; selPago='debe';
+    setHint();
+    del.style.display='none';
+  }
+  setSeg(document.getElementById('segTipo'), selTipo);
+  setSeg(document.getElementById('segPago'), selPago);
+  openSheet(formSheet);
+}
+window.openEdit=(id)=>{ if(MAP_OK) map.closePopup(); openForm(id); };
+
+function setHint(){
+  const h=document.getElementById('gpsHint');
+  if(pickedLatLng){ h.innerHTML='📍 Punto fijado a mano. <a href="#" id="rePick" style="color:var(--accent)">Cambiar en el mapa</a>'; }
+  else { h.innerHTML='Al guardar, busco la dirección en el mapa. O <a href="#" id="rePick" style="color:var(--accent)">tocá el mapa</a> para fijar el punto a mano.'; }
+  const rp=document.getElementById('rePick');
+  if(rp) rp.onclick=(e)=>{ e.preventDefault(); startPick(); };
+}
+
+function startPick(){
+  if(!MAP_OK){ alert('El mapa no está disponible. Escribí la dirección a mano en el campo Ubicación.'); return; }
+  pickMode=true;
+  closeSheetsKeepForm();
+  const t=document.getElementById('tapHint'); t.classList.add('show');
+}
+function closeSheetsKeepForm(){
+  // baja el sheet pero mantiene el form abierto en memoria; el scrim sigue
+  formSheet.classList.remove('open');
+  scrim.classList.remove('open');
+}
+
+if(MAP_OK){
+  map.on('click',e=>{
+    if(!pickMode) return;
+    pickedLatLng={lat:+e.latlng.lat.toFixed(6),lng:+e.latlng.lng.toFixed(6)};
+    pickMode=false;
+    document.getElementById('tapHint').classList.remove('show');
+    setHint();
+    openSheet(formSheet);
+  });
+}
+
+/* Geocodificación: convierte una dirección escrita en coordenadas usando
+   Nominatim (OpenStreetMap, gratuito). Sesga la búsqueda a Buenos Aires. */
+async function buscarCoords(direccion){
+  const q = encodeURIComponent(direccion + ', Buenos Aires, Argentina');
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&q=${q}`;
+  const r = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+  if(!r.ok) throw new Error('geocode falló');
+  const arr = await r.json();
+  if(!arr.length) return null;
+  return { lat: +(+arr[0].lat).toFixed(6), lng: +(+arr[0].lon).toFixed(6) };
+}
+
+/* Guardar */
+const saveBtn = document.getElementById('saveBtn');
+saveBtn.onclick = async ()=>{
+  const cliente=document.getElementById('f_cliente').value.trim();
+  const dir=document.getElementById('f_dir').value.trim();
+  if(!cliente && !dir){ alert('Poné al menos un cliente/referencia o una dirección.'); return; }
+  let tipo=selTipo;
+  if(selTipo==='Otro'){ tipo=document.getElementById('f_tipoOtro').value.trim()||'Otro'; }
+
+  let lat=null,lng=null;
+  if(pickedLatLng){ lat=pickedLatLng.lat; lng=pickedLatLng.lng; }
+
+  // Si no se marcó punto a mano pero hay dirección escrita, buscarla en el mapa.
+  if(lat==null && dir){
+    const prev = saveBtn.textContent;
+    saveBtn.textContent = 'Buscando dirección…';
+    saveBtn.disabled = true;
+    try{
+      const c = await buscarCoords(dir);
+      if(c){ lat=c.lat; lng=c.lng; }
+      else if(!editingId){
+        alert('No encontré esa dirección en el mapa. Se guarda igual; podés ubicarla tocando el mapa al editar.');
+      }
+    }catch(err){
+      alert('No se pudo buscar la dirección (sin conexión al buscador). Se guarda igual.');
+    }finally{
+      saveBtn.textContent = prev;
+      saveBtn.disabled = false;
+    }
+  }
+
+  const rec={
+    id: editingId||uid(),
+    cliente, dir,
+    fecha:document.getElementById('f_fecha').value,
+    tipo, pago:selPago,
+    nota:document.getElementById('f_nota').value.trim(),
+    lat,lng
+  };
+
+  if(editingId){
+    const i=data.findIndex(x=>x.id===editingId);
+    // conservar lat/lng previos si no se eligió uno nuevo ni se geocodificó
+    if(lat==null && data[i].lat!=null){ rec.lat=data[i].lat; rec.lng=data[i].lng; }
+    data[i]=rec;
+  }else{
+    data.push(rec);
+  }
+  save(); refresh(); closeSheets();
+  if(rec.lat!=null && MAP_OK){ map.setView([rec.lat,rec.lng], Math.max(map.getZoom(),15)); }
+};
+
+/* Eliminar */
+document.getElementById('delBtn').onclick=()=>{
+  if(!editingId) return;
+  if(!confirm('¿Eliminar este volquete?')) return;
+  data=data.filter(x=>x.id!==editingId);
+  save(); refresh(); closeSheets();
+};
+
+/* ---------- Render global ---------- */
+function refresh(){ renderMarkers(); renderList(); updateCount(); }
+refresh();
+
+/* arranque: si hay datos, encuadrar */
+if(MAP_OK){
+  const withGeo=data.filter(v=>v.lat!=null);
+  if(withGeo.length){
+    const b=L.latLngBounds(withGeo.map(v=>[v.lat,v.lng]));
+    map.fitBounds(b.pad(0.3));
+  }
+}
+</script>
+</body>
+</html>
