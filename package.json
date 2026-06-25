@@ -1,0 +1,12 @@
+{
+  "name": "volquetes-san-miguel",
+  "version": "1.0.0",
+  "description": "App de referencia rápida de volquetes",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
